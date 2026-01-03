@@ -13,7 +13,6 @@ HTML_PAGE = """
         :root { --neon: #00f3ff; --term: #00ff41; --danger: #ff003c; --gold: #ffd700; --bg: #050505; }
         body { background: var(--bg); color: var(--neon); font-family: 'Consolas', monospace; margin: 0; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
         
-        /* LOGIN / NAV BAR - Same as your file */
         .nav-bar { background: #111; padding: 15px; border-bottom: 2px solid var(--neon); display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.8); }
         input { background: #000; border: 1px solid #333; color: var(--neon); padding: 10px; border-radius: 4px; font-size: 12px; outline: none; border: 1px solid #444; }
         
@@ -22,7 +21,6 @@ HTML_PAGE = """
         .atk-btn { background: var(--term) !important; color: #000 !important; border: none !important; box-shadow: 0 0 10px var(--term); }
         .danger-btn { border-color: var(--danger); color: var(--danger); }
 
-        /* TERMINAL AREA - Same as your file */
         .terminal-zone { flex: 1; display: flex; flex-direction: column; background: #000; overflow: hidden; }
         .term-head { background: #1a1a1a; padding: 8px 15px; font-size: 11px; color: #666; display: flex; justify-content: space-between; border-bottom: 1px solid #222; }
         .terminal-body { flex: 1; overflow-y: scroll; padding: 15px; font-size: 12px; scroll-behavior: smooth; }
@@ -33,7 +31,6 @@ HTML_PAGE = """
         .err { color: var(--danger); border-color: var(--danger); }
         .game { color: var(--gold); border-color: var(--gold); background: rgba(255, 215, 0, 0.05); }
         
-        /* JSON BOX */
         .json-dump { background: #080808; padding: 10px; margin-top: 5px; border: 1px solid #1a1a1a; display: block; color: #00ccff; font-size: 11px; border-radius: 4px; white-space: pre-wrap; font-family: monospace; }
         
         ::-webkit-scrollbar { width: 6px; }
@@ -42,7 +39,6 @@ HTML_PAGE = """
 </head>
 <body>
     <div class="nav-bar">
-        <!-- LOGIN INPUTS -->
         <input type="text" id="u" placeholder="Bot User">
         <input type="password" id="p" placeholder="Bot Pass">
         <input type="text" id="r" placeholder="Room Name">
@@ -56,7 +52,7 @@ HTML_PAGE = """
 
     <div class="terminal-zone">
         <div class="term-head">
-            <span>TITAN_GAME_ENGINE v1.0 [MINEFIELD_MODE]</span>
+            <span>TITAN_GAME_ENGINE v2.1 [PROTOCOL_FIXED]</span>
             <span id="stat">OFFLINE</span>
         </div>
         <div id="terminal" class="terminal-body">
@@ -68,12 +64,11 @@ HTML_PAGE = """
     <script>
         let ws; let pinger; const term = document.getElementById('terminal');
 
-        // --- GAME VARIABLES ---
         let gameState = {
             active: false,
             player: null,
-            bombs: [],     // 2 Hidden Bombs
-            eaten: []      // Safe spots found
+            bombs: [],     
+            eaten: []      
         };
 
         function log(msg, type='sys', payload=null) {
@@ -103,20 +98,21 @@ HTML_PAGE = """
                 ws.send(JSON.stringify(loginData));
                 log("SENT >> LOGIN_REQUEST", "out", loginData);
                 
-                pinger = setInterval(() => { if(ws.readyState === 1) ws.send(JSON.stringify({handler:"ping"})); }, 25000);
+                pinger = setInterval(() => { if(ws.readyState === 1) ws.send(JSON.stringify({handler:"ping"})); }, 20000);
             };
 
             ws.onmessage = (e) => {
                 const data = JSON.parse(e.data);
                 
-                // Show logs just like before
+                // IGNORE ACKNOWLEDGEMENTS IN LOGS TO REDUCE SPAM
+                if(data.handler === "receipt_ack") return; 
+
                 log("RECV << " + (data.handler || "EVENT"), "in", data);
                 
                 if(data.handler === "login_event" && data.type === "success") {
                     ws.send(JSON.stringify({handler: "room_join", id: Math.random(), name: r}));
                 }
 
-                // --- GAME LOGIC TRIGGER ---
                 if(data.handler === "room_event" && data.type === "text") {
                     handleGameCommand(data.from, data.body);
                 }
@@ -127,15 +123,14 @@ HTML_PAGE = """
                 document.getElementById('stat').innerText = "OFFLINE";
                 document.getElementById('stat').style.color = "var(--danger)";
                 log("WebSocket Disconnected. Attempting Auto-Relogin...", "err");
-                setTimeout(connectWS, 3000); // Auto-Reconnect
+                setTimeout(connectWS, 3000); 
             };
         }
 
-        // --- MAIN GAME FUNCTION ---
         function handleGameCommand(user, msg) {
             msg = msg.trim().toLowerCase();
             const myUser = document.getElementById('u').value.toLowerCase();
-            if(user.toLowerCase() === myUser) return; // Don't reply to self
+            if(user.toLowerCase() === myUser) return; 
 
             // 1. START COMMAND
             if (msg === "!start") {
@@ -143,13 +138,11 @@ HTML_PAGE = """
                     return sendRoomMsg(`⚠ Game running! ${gameState.player} is playing.`);
                 }
                 
-                // Setup New Game
                 gameState.active = true;
                 gameState.player = user;
                 gameState.eaten = [];
                 gameState.bombs = [];
                 
-                // Generate 2 Unique Bombs
                 while(gameState.bombs.length < 2) {
                     let r = Math.floor(Math.random() * 9) + 1;
                     if(!gameState.bombs.includes(r)) gameState.bombs.push(r);
@@ -164,23 +157,20 @@ HTML_PAGE = """
             // 2. EAT COMMAND
             else if (msg.startsWith("!eat ")) {
                 if (!gameState.active) return;
-                if (user !== gameState.player) return; // Only current player
+                if (user !== gameState.player) return; 
 
                 const num = parseInt(msg.split(" ")[1]);
 
-                // Validation
                 if (isNaN(num) || num < 1 || num > 9) return sendRoomMsg(`⚠ Choose 1-9.`);
                 if (gameState.eaten.includes(num)) return sendRoomMsg(`⚠ Already eaten!`);
 
-                // Check Bomb
                 if (gameState.bombs.includes(num)) {
                     gameState.active = false;
-                    const finalGrid = renderGrid(true, num); // Reveal all
+                    const finalGrid = renderGrid(true, num); 
                     sendRoomMsg(`💥 BOOM! You ate a BOMB at #${num}!\\n💀 GAME OVER.\\nBombs were at: ${gameState.bombs.join(' & ')}\\n\\n${finalGrid}`);
                     log(`GAME OVER: ${user} died on ${num}`, "err");
                 } 
                 else {
-                    // Safe Spot
                     gameState.eaten.push(num);
                     if (gameState.eaten.length === 7) {
                         gameState.active = false;
@@ -195,33 +185,35 @@ HTML_PAGE = """
             }
         }
 
-        // --- GRID RENDERER ---
         function renderGrid(reveal = false, explodedAt = null) {
             let txt = "";
             const icons = ["1️⃣","2️⃣","3️⃣","4️⃣","5️⃣","6️⃣","7️⃣","8️⃣","9️⃣"];
             
             for(let i=1; i<=9; i++) {
-                if(reveal && i === explodedAt) txt += "💥 ";        // Exploded Bomb
-                else if(reveal && gameState.bombs.includes(i)) txt += "💣 "; // Hidden Bomb Revealed
-                else if(gameState.eaten.includes(i)) txt += "🥔 ";   // Eaten Safe Spot
-                else txt += icons[i-1] + " ";                        // Normal Number
+                if(reveal && i === explodedAt) txt += "💥 ";        
+                else if(reveal && gameState.bombs.includes(i)) txt += "💣 "; 
+                else if(gameState.eaten.includes(i)) txt += "🥔 ";   
+                else txt += icons[i-1] + " ";                        
 
-                if(i % 3 === 0 && i !== 9) txt += "\\n"; // New Line
+                if(i % 3 === 0 && i !== 9) txt += "\\n"; 
             }
             return txt;
         }
 
+        // --- UPDATED SENDING FUNCTION BASED ON TANVAR.PY ---
         function sendRoomMsg(text) {
             const r = document.getElementById('r').value;
             if(!ws || ws.readyState !== 1) return;
             
+            // CORRECTED PAYLOAD FOR PUBLIC ROOM
             const pkt = {
-                handler: "chat_message", 
-                to: r,          // Target (Room)
-                room: r,        // Room context
-                type: "text", 
-                body: text, 
-                is_private: false 
+                handler: "room_message",  // FIX: chat_message -> room_message
+                id: Math.random(),
+                room: r,
+                type: "text",
+                body: text,
+                url: "",                  // Required by protocol
+                length: ""                // Required by protocol
             };
             
             ws.send(JSON.stringify(pkt));
