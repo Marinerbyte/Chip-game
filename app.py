@@ -268,7 +268,7 @@ class BombBot:
         # --- COMMANDS ---
         
         # 1. Start Game
-        if text == "/bombchip":
+        if text == "!bombchip":
             if sid in self.sessions:
                 self.send_txt(room, f"@{sender} You have a game active! Pick a number.")
                 return
@@ -307,7 +307,7 @@ class BombBot:
                         del self.sessions[sid]
             
         # 3. Leaderboard Link
-        elif text == "/ladder":
+        elif text == "!ladder":
              self.send_txt(room, f"🏆 LEADERBOARD: {request.host_url}leaderboard")
 
     def send_txt(self, room, msg):
