@@ -1,8 +1,72 @@
 import os
-from flask import Flask, render_template_string
+import io
+import requests
+from flask import Flask, render_template_string, request, send_file
+from PIL import Image, ImageDraw, ImageFont
 
 app = Flask(__name__)
 
+# --- PYTHON IMAGE GENERATOR (PILLOW) ---
+@app.route('/winner-card')
+def winner_card():
+    try:
+        # Get Query Parameters
+        username = request.args.get('name', 'Winner')
+        avatar_url = request.args.get('avatar', '')
+
+        # 1. Create Base Image (Dark Background)
+        width, height = 600, 300
+        img = Image.new('RGB', (width, height), color=(20, 20, 20))
+        draw = ImageDraw.Draw(img)
+
+        # 2. Add Border (Gold/Neon)
+        draw.rectangle([0, 0, width-1, height-1], outline="#00f3ff", width=5)
+        draw.rectangle([10, 10, width-10, height-10], outline="#ffd700", width=2)
+
+        # 3. Process Avatar
+        try:
+            if avatar_url:
+                response = requests.get(avatar_url, timeout=5)
+                avi = Image.open(io.BytesIO(response.content)).convert("RGBA")
+                avi = avi.resize((150, 150))
+                
+                # Make Avatar Circular (Optional simple mask)
+                mask = Image.new("L", (150, 150), 0)
+                draw_mask = ImageDraw.Draw(mask)
+                draw_mask.ellipse((0, 0, 150, 150), fill=255)
+                
+                img.paste(avi, (50, 75), mask)
+            else:
+                # Fallback circle if no avatar
+                draw.ellipse((50, 75, 200, 225), fill="#333", outline="#fff")
+        except:
+            pass # Ignore avatar errors
+
+        # 4. Add Text
+        # Note: We use default font to avoid file path errors on Render
+        # Ideally, upload a .ttf file to use custom fonts
+        
+        # Title
+        draw.text((230, 80), "🏆 GAME WINNER 🏆", fill="#ffd700", font_size=20) 
+        # For default font, size isn't adjustable easily without .ttf, 
+        # so we rely on scaling or default behavior. 
+        # Since PIL default font is tiny, let's try to load a basic one if possible,
+        # or just stick to simple text.
+        
+        draw.text((230, 120), username, fill="#ffffff")
+        draw.text((230, 150), "Safe Chips Eaten: 5/5", fill="#00ff41")
+        draw.text((230, 180), "TITAN OS CHAMPION", fill="#00f3ff")
+
+        # 5. Save to Buffer
+        img_io = io.BytesIO()
+        img.save(img_io, 'PNG')
+        img_io.seek(0)
+        return send_file(img_io, mimetype='image/png')
+
+    except Exception as e:
+        return str(e), 500
+
+# --- FRONTEND HTML/JS ---
 HTML_PAGE = """
 <!DOCTYPE html>
 <html>
@@ -52,12 +116,12 @@ HTML_PAGE = """
 
     <div class="terminal-zone">
         <div class="term-head">
-            <span>TITAN_GAME_ENGINE v2.1 [PROTOCOL_FIXED]</span>
+            <span>TITAN_GAME_ENGINE v3.0 [WINNER_CARD_ENABLED]</span>
             <span id="stat">OFFLINE</span>
         </div>
         <div id="terminal" class="terminal-body">
             <div class="line">System ready. Enter credentials and click CONNECT BOT.</div>
-            <div class="line game">Game Logic Loaded: 1-9 Grid, 2 Hidden Bombs, 7 Safe Spots.</div>
+            <div class="line game">Game Rules Updated: 2 Bombs, Win at 5 Safe Chips.</div>
         </div>
     </div>
 
@@ -70,6 +134,9 @@ HTML_PAGE = """
             bombs: [],     
             eaten: []      
         };
+
+        // Cache for User Avatars: username -> avatar_url
+        let userAvatars = {};
 
         function log(msg, type='sys', payload=null) {
             const div = document.createElement('div');
@@ -96,16 +163,17 @@ HTML_PAGE = """
                 
                 const loginData = {handler: "login", id: Math.random(), username: u, password: p, platform: "web"};
                 ws.send(JSON.stringify(loginData));
-                log("SENT >> LOGIN_REQUEST", "out", loginData);
-                
                 pinger = setInterval(() => { if(ws.readyState === 1) ws.send(JSON.stringify({handler:"ping"})); }, 20000);
             };
 
             ws.onmessage = (e) => {
                 const data = JSON.parse(e.data);
-                
-                // IGNORE ACKNOWLEDGEMENTS IN LOGS TO REDUCE SPAM
                 if(data.handler === "receipt_ack") return; 
+
+                // Store Avatar if available
+                if(data.from && data.avatar_url) {
+                    userAvatars[data.from] = data.avatar_url;
+                }
 
                 log("RECV << " + (data.handler || "EVENT"), "in", data);
                 
@@ -122,7 +190,6 @@ HTML_PAGE = """
                 clearInterval(pinger);
                 document.getElementById('stat').innerText = "OFFLINE";
                 document.getElementById('stat').style.color = "var(--danger)";
-                log("WebSocket Disconnected. Attempting Auto-Relogin...", "err");
                 setTimeout(connectWS, 3000); 
             };
         }
@@ -148,10 +215,9 @@ HTML_PAGE = """
                     if(!gameState.bombs.includes(r)) gameState.bombs.push(r);
                 }
 
-                log(`GAME STARTED by ${user}. Hidden Bombs: [${gameState.bombs.join(', ')}]`, "game");
-                
+                log(`GAME STARTED by ${user}. Bombs: [${gameState.bombs.join(', ')}]`, "game");
                 const grid = renderGrid();
-                sendRoomMsg(`🎮 START! Player: ${user}\\nAvoid 2 Bombs! Eat 7 Chips.\\nType !eat <number>\\n\\n${grid}`);
+                sendRoomMsg(`🎮 START! Player: ${user}\\nAvoid 2 Bombs! Eat 5 Chips to WIN.\\nType !eat <number>\\n\\n${grid}`);
             }
 
             // 2. EAT COMMAND
@@ -165,21 +231,33 @@ HTML_PAGE = """
                 if (gameState.eaten.includes(num)) return sendRoomMsg(`⚠ Already eaten!`);
 
                 if (gameState.bombs.includes(num)) {
+                    // --- LOSE ---
                     gameState.active = false;
                     const finalGrid = renderGrid(true, num); 
-                    sendRoomMsg(`💥 BOOM! You ate a BOMB at #${num}!\\n💀 GAME OVER.\\nBombs were at: ${gameState.bombs.join(' & ')}\\n\\n${finalGrid}`);
+                    sendRoomMsg(`💥 BOOM! BOMB AT #${num}!\\n💀 GAME OVER.\\nBombs: ${gameState.bombs.join(' & ')}\\n\\n${finalGrid}`);
                     log(`GAME OVER: ${user} died on ${num}`, "err");
                 } 
                 else {
+                    // --- SAFE ---
                     gameState.eaten.push(num);
-                    if (gameState.eaten.length === 7) {
+                    
+                    // WIN CONDITION: 5 CHIPS (UPDATED RULE)
+                    if (gameState.eaten.length === 5) {
                         gameState.active = false;
                         const finalGrid = renderGrid(true);
-                        sendRoomMsg(`🎉 WINNER! ${user} ate all 7 chips!\\n🥔 CHAMPION!\\n\\n${finalGrid}`);
+                        
+                        // 1. Announce Win Text
+                        sendRoomMsg(`🎉 WINNER! ${user} ate 5 chips!\\n🥔 CHAMPION! Generating Prize...\\n\\n${finalGrid}`);
+                        
+                        // 2. Generate and Send Winner Image
+                        setTimeout(() => {
+                            sendWinnerImage(user);
+                        }, 1000);
+
                         log(`VICTORY: ${user} won!`, "game");
                     } else {
                         const grid = renderGrid();
-                        sendRoomMsg(`🥔 CRUNCH! #${num} is safe.\\n${grid}`);
+                        sendRoomMsg(`🥔 SAFE! (${gameState.eaten.length}/5)\\n${grid}`);
                     }
                 }
             }
@@ -188,36 +266,47 @@ HTML_PAGE = """
         function renderGrid(reveal = false, explodedAt = null) {
             let txt = "";
             const icons = ["1️⃣","2️⃣","3️⃣","4️⃣","5️⃣","6️⃣","7️⃣","8️⃣","9️⃣"];
-            
             for(let i=1; i<=9; i++) {
                 if(reveal && i === explodedAt) txt += "💥 ";        
                 else if(reveal && gameState.bombs.includes(i)) txt += "💣 "; 
                 else if(gameState.eaten.includes(i)) txt += "🥔 ";   
                 else txt += icons[i-1] + " ";                        
-
                 if(i % 3 === 0 && i !== 9) txt += "\\n"; 
             }
             return txt;
         }
 
-        // --- UPDATED SENDING FUNCTION BASED ON TANVAR.PY ---
+        // Send Text Message
         function sendRoomMsg(text) {
             const r = document.getElementById('r').value;
             if(!ws || ws.readyState !== 1) return;
-            
-            // CORRECTED PAYLOAD FOR PUBLIC ROOM
             const pkt = {
-                handler: "room_message",  // FIX: chat_message -> room_message
-                id: Math.random(),
-                room: r,
-                type: "text",
-                body: text,
-                url: "",                  // Required by protocol
-                length: ""                // Required by protocol
+                handler: "room_message", id: Math.random(), room: r, type: "text", body: text, url: "", length: ""
             };
-            
             ws.send(JSON.stringify(pkt));
             log("SENT_MSG >> " + text.split('\\n')[0] + "...", "out");
+        }
+
+        // Send Winner Image (Calls Python Backend)
+        function sendWinnerImage(winnerName) {
+            const r = document.getElementById('r').value;
+            const avatar = userAvatars[winnerName] || "";
+            
+            // Construct Render URL for the image
+            const myUrl = window.location.origin + "/winner-card?name=" + winnerName + "&avatar=" + encodeURIComponent(avatar);
+
+            log("GENERATING IMG >> " + myUrl, "game");
+
+            const pkt = {
+                handler: "room_message", 
+                id: Math.random(),
+                room: r,
+                type: "image",     // Sending Image Type
+                body: "", 
+                url: myUrl,        // URL to our Python Generated Image
+                length: "0"
+            };
+            ws.send(JSON.stringify(pkt));
         }
         
         function resetGameLocally() {
