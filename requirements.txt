@@ -3,3 +3,4 @@ gunicorn
 Pillow
 requests
 websocket-client
+psycopg2-binary
