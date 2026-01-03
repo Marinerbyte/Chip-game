@@ -1,3 +1,5 @@
 flask
-pillow
-gunicorn
+websocket-client
+requests
+requests_toolbelt
+Pillow
