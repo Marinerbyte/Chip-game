@@ -1,6 +1,2 @@
 flask
 gunicorn
-websocket-client
-requests
-requests_toolbelt
-Pillow
