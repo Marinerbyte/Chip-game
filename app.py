@@ -25,37 +25,34 @@ def winner_card():
 
         # 3. Process Avatar
         try:
-            if avatar_url:
-                response = requests.get(avatar_url, timeout=5)
+            if avatar_url and avatar_url != "undefined" and avatar_url != "":
+                # Fake a Browser Request to avoid 403 Forbidden Error
+                headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+                response = requests.get(avatar_url, headers=headers, timeout=5)
+                
                 avi = Image.open(io.BytesIO(response.content)).convert("RGBA")
                 avi = avi.resize((150, 150))
                 
-                # Make Avatar Circular (Optional simple mask)
+                # Make Avatar Circular
                 mask = Image.new("L", (150, 150), 0)
                 draw_mask = ImageDraw.Draw(mask)
                 draw_mask.ellipse((0, 0, 150, 150), fill=255)
                 
                 img.paste(avi, (50, 75), mask)
             else:
-                # Fallback circle if no avatar
-                draw.ellipse((50, 75, 200, 225), fill="#333", outline="#fff")
-        except:
-            pass # Ignore avatar errors
+                # Fallback (If no photo found)
+                draw.ellipse((50, 75, 200, 225), fill="#444", outline="#fff")
+                draw.text((90, 140), "NO IMG", fill="#fff")
+        except Exception as e:
+            print(f"Avatar Error: {e}")
+            draw.ellipse((50, 75, 200, 225), fill="#444", outline="#fff")
 
         # 4. Add Text
-        # Note: We use default font to avoid file path errors on Render
-        # Ideally, upload a .ttf file to use custom fonts
-        
-        # Title
-        draw.text((230, 80), "🏆 GAME WINNER 🏆", fill="#ffd700", font_size=20) 
-        # For default font, size isn't adjustable easily without .ttf, 
-        # so we rely on scaling or default behavior. 
-        # Since PIL default font is tiny, let's try to load a basic one if possible,
-        # or just stick to simple text.
-        
-        draw.text((230, 120), username, fill="#ffffff")
-        draw.text((230, 150), "Safe Chips Eaten: 5/5", fill="#00ff41")
-        draw.text((230, 180), "TITAN OS CHAMPION", fill="#00f3ff")
+        # Note: Using default PIL font
+        draw.text((230, 80), "--- WINNER ---", fill="#ffd700") 
+        draw.text((230, 110), f"Name: {username}", fill="#ffffff")
+        draw.text((230, 140), "Result: 4 Safe Chips", fill="#00ff41") # UPDATED TEXT
+        draw.text((230, 170), "Status: TITAN CHAMPION", fill="#00f3ff")
 
         # 5. Save to Buffer
         img_io = io.BytesIO()
@@ -82,7 +79,6 @@ HTML_PAGE = """
         
         button { padding: 10px; font-weight: bold; cursor: pointer; border: 1px solid var(--neon); background: transparent; color: var(--neon); font-size: 11px; text-transform: uppercase; }
         button:hover { background: var(--neon); color: #000; }
-        .atk-btn { background: var(--term) !important; color: #000 !important; border: none !important; box-shadow: 0 0 10px var(--term); }
         .danger-btn { border-color: var(--danger); color: var(--danger); }
 
         .terminal-zone { flex: 1; display: flex; flex-direction: column; background: #000; overflow: hidden; }
@@ -116,12 +112,12 @@ HTML_PAGE = """
 
     <div class="terminal-zone">
         <div class="term-head">
-            <span>TITAN_GAME_ENGINE v3.0 [WINNER_CARD_ENABLED]</span>
+            <span>TITAN_GAME_ENGINE v4.0 [EASY_MODE: 4_TO_WIN]</span>
             <span id="stat">OFFLINE</span>
         </div>
         <div id="terminal" class="terminal-body">
             <div class="line">System ready. Enter credentials and click CONNECT BOT.</div>
-            <div class="line game">Game Rules Updated: 2 Bombs, Win at 5 Safe Chips.</div>
+            <div class="line game">Game Rules: 2 Bombs, Win at 4 Safe Chips.</div>
         </div>
     </div>
 
@@ -135,7 +131,7 @@ HTML_PAGE = """
             eaten: []      
         };
 
-        // Cache for User Avatars: username -> avatar_url
+        // Cache for User Avatars
         let userAvatars = {};
 
         function log(msg, type='sys', payload=null) {
@@ -170,7 +166,7 @@ HTML_PAGE = """
                 const data = JSON.parse(e.data);
                 if(data.handler === "receipt_ack") return; 
 
-                // Store Avatar if available
+                // --- CAPTURE AVATAR ---
                 if(data.from && data.avatar_url) {
                     userAvatars[data.from] = data.avatar_url;
                 }
@@ -217,7 +213,8 @@ HTML_PAGE = """
 
                 log(`GAME STARTED by ${user}. Bombs: [${gameState.bombs.join(', ')}]`, "game");
                 const grid = renderGrid();
-                sendRoomMsg(`🎮 START! Player: ${user}\\nAvoid 2 Bombs! Eat 5 Chips to WIN.\\nType !eat <number>\\n\\n${grid}`);
+                // UPDATED TEXT: Eat 4 Chips
+                sendRoomMsg(`🎮 START! Player: ${user}\\nAvoid 2 Bombs! Eat 4 Chips to WIN.\\nType !eat <number>\\n\\n${grid}`);
             }
 
             // 2. EAT COMMAND
@@ -241,15 +238,13 @@ HTML_PAGE = """
                     // --- SAFE ---
                     gameState.eaten.push(num);
                     
-                    // WIN CONDITION: 5 CHIPS (UPDATED RULE)
-                    if (gameState.eaten.length === 5) {
+                    // WIN CONDITION CHANGED TO 4
+                    if (gameState.eaten.length === 4) { 
                         gameState.active = false;
                         const finalGrid = renderGrid(true);
                         
-                        // 1. Announce Win Text
-                        sendRoomMsg(`🎉 WINNER! ${user} ate 5 chips!\\n🥔 CHAMPION! Generating Prize...\\n\\n${finalGrid}`);
+                        sendRoomMsg(`🎉 WINNER! ${user} ate 4 chips!\\n🥔 CHAMPION! Generating Prize...\\n\\n${finalGrid}`);
                         
-                        // 2. Generate and Send Winner Image
                         setTimeout(() => {
                             sendWinnerImage(user);
                         }, 1000);
@@ -257,7 +252,8 @@ HTML_PAGE = """
                         log(`VICTORY: ${user} won!`, "game");
                     } else {
                         const grid = renderGrid();
-                        sendRoomMsg(`🥔 SAFE! (${gameState.eaten.length}/5)\\n${grid}`);
+                        // UPDATED TEXT: (x/4)
+                        sendRoomMsg(`🥔 SAFE! (${gameState.eaten.length}/4)\\n${grid}`);
                     }
                 }
             }
@@ -276,7 +272,6 @@ HTML_PAGE = """
             return txt;
         }
 
-        // Send Text Message
         function sendRoomMsg(text) {
             const r = document.getElementById('r').value;
             if(!ws || ws.readyState !== 1) return;
@@ -287,12 +282,9 @@ HTML_PAGE = """
             log("SENT_MSG >> " + text.split('\\n')[0] + "...", "out");
         }
 
-        // Send Winner Image (Calls Python Backend)
         function sendWinnerImage(winnerName) {
             const r = document.getElementById('r').value;
             const avatar = userAvatars[winnerName] || "";
-            
-            // Construct Render URL for the image
             const myUrl = window.location.origin + "/winner-card?name=" + winnerName + "&avatar=" + encodeURIComponent(avatar);
 
             log("GENERATING IMG >> " + myUrl, "game");
@@ -301,9 +293,9 @@ HTML_PAGE = """
                 handler: "room_message", 
                 id: Math.random(),
                 room: r,
-                type: "image",     // Sending Image Type
+                type: "image",     
                 body: "", 
-                url: myUrl,        // URL to our Python Generated Image
+                url: myUrl,        
                 length: "0"
             };
             ws.send(JSON.stringify(pkt));
