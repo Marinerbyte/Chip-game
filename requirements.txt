@@ -2,3 +2,4 @@ Flask
 gunicorn
 Pillow
 requests
+websocket-client
